@@ -67,20 +67,43 @@ class PortalConfig(models.Model):
         self.ensure_one()
         session = self._get_session()
 
-        # Download the file as .xls
+        # Download the file
         response = session.get(self.data_url)
         if response.status_code != 200:
             raise UserError("Failed to download file from portal")
 
-        # Save as .xls since that's what the server sends
-        with tempfile.NamedTemporaryFile(suffix='.xls', delete=False) as temp_file:
+        # Save file and try different reading methods
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
             temp_file.write(response.content)
             temp_path = temp_file.name
 
         try:
-            # Try reading with xlrd for .xls files
-            df = pd.read_excel(temp_path, engine='xlrd')
-            
+            df = None
+            errors = []
+
+            # Try reading as xlsx
+            try:
+                df = pd.read_excel(temp_path, engine='openpyxl')
+            except Exception as e:
+                errors.append(f"XLSX attempt failed: {str(e)}")
+
+            # Try reading as CSV if xlsx failed
+            if df is None:
+                try:
+                    df = pd.read_csv(temp_path)
+                except Exception as e:
+                    errors.append(f"CSV attempt failed: {str(e)}")
+
+            # Try reading as xls with fallback settings
+            if df is None:
+                try:
+                    df = pd.read_excel(temp_path, engine='xlrd', dtype=str)
+                except Exception as e:
+                    errors.append(f"XLS attempt failed: {str(e)}")
+
+            if df is None:
+                raise UserError(f"Failed to read file in any format. Errors:\n" + "\n".join(errors))
+
             if df.empty:
                 raise UserError("No data found in the downloaded file")
 
