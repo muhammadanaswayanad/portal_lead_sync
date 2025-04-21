@@ -2,6 +2,7 @@ import requests
 import pandas as pd
 import tempfile
 import os
+import magic
 from odoo import models, fields, api
 from odoo.exceptions import UserError
 from urllib.parse import quote
@@ -34,17 +35,35 @@ class PortalConfig(models.Model):
         # Download Excel file
         response = session.get(self.data_url)
         if response.status_code != 200:
-            return False
+            raise UserError("Failed to download file from portal")
 
         # Save response content to temporary file
-        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as temp_file:
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
             temp_file.write(response.content)
             temp_path = temp_file.name
 
         try:
-            # Read Excel data with explicit engine
-            df = pd.read_excel(temp_path, engine='openpyxl')
+            # Detect file type
+            file_type = magic.from_file(temp_path, mime=True)
             
+            if file_type == 'application/vnd.ms-excel':
+                # Old .xls format
+                df = pd.read_excel(temp_path, engine='xlrd')
+            elif file_type in ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
+                             'application/zip']:
+                # New .xlsx format
+                df = pd.read_excel(temp_path, engine='openpyxl')
+            else:
+                raise UserError(f"Unsupported file format: {file_type}")
+            
+            if df.empty:
+                raise UserError("No data found in the downloaded file")
+
+            required_columns = ['id', 'name', 'email', 'phone', 'city']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                raise UserError(f"Missing required columns: {', '.join(missing_columns)}")
+
             Lead = self.env['crm.lead']
             SyncLog = self.env['lead.sync.log']
 
@@ -73,6 +92,8 @@ class PortalConfig(models.Model):
             self.last_sync = fields.Datetime.now()
             return True
 
+        except pd.errors.EmptyDataError:
+            raise UserError("The Excel file is empty")
         except Exception as e:
             raise UserError(f"Error processing Excel file: {str(e)}")
         finally:
