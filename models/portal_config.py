@@ -37,25 +37,30 @@ class PortalConfig(models.Model):
         if response.status_code != 200:
             raise UserError("Failed to download file from portal")
 
-        # Save response content to temporary file
-        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+        # Try different Excel formats
+        errors = []
+        
+        # First try xlsx
+        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as temp_file:
             temp_file.write(response.content)
             temp_path = temp_file.name
+            
+        try:
+            df = pd.read_excel(temp_path, engine='openpyxl')
+        except Exception as e:
+            errors.append(f"XLSX attempt failed: {str(e)}")
+            # Try xls format
+            os.unlink(temp_path)
+            with tempfile.NamedTemporaryFile(suffix='.xls', delete=False) as temp_file:
+                temp_file.write(response.content)
+                temp_path = temp_file.name
+                try:
+                    df = pd.read_excel(temp_path, engine='xlrd')
+                except Exception as e:
+                    errors.append(f"XLS attempt failed: {str(e)}")
+                    raise UserError(f"Failed to read Excel file in any format. Errors:\n" + "\n".join(errors))
 
         try:
-            # Detect file type
-            file_type = magic.from_file(temp_path, mime=True)
-            
-            if file_type == 'application/vnd.ms-excel':
-                # Old .xls format
-                df = pd.read_excel(temp_path, engine='xlrd')
-            elif file_type in ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
-                             'application/zip']:
-                # New .xlsx format
-                df = pd.read_excel(temp_path, engine='openpyxl')
-            else:
-                raise UserError(f"Unsupported file format: {file_type}")
-            
             if df.empty:
                 raise UserError("No data found in the downloaded file")
 
@@ -92,12 +97,9 @@ class PortalConfig(models.Model):
             self.last_sync = fields.Datetime.now()
             return True
 
-        except pd.errors.EmptyDataError:
-            raise UserError("The Excel file is empty")
         except Exception as e:
-            raise UserError(f"Error processing Excel file: {str(e)}")
+            raise UserError(f"Error processing Excel data: {str(e)}")
         finally:
-            # Clean up temporary file
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
 
