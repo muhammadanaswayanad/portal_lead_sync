@@ -5,6 +5,7 @@ import os
 from odoo import models, fields, api
 from odoo.exceptions import UserError
 import logging
+from bs4 import BeautifulSoup
 
 _logger = logging.getLogger(__name__)
 
@@ -29,24 +30,35 @@ class PortalConfig(models.Model):
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
             'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive'
+            'Connection': 'keep-alive',
+            'Cache-Control': 'no-cache'
         })
         
-        # First visit login page
-        session.get('https://www.cindrebay.in/login.php')
+        # Get login page and extract any hidden fields
+        login_page = session.get('https://www.cindrebay.in/login.php')
+        soup = BeautifulSoup(login_page.text, 'html.parser')
+        login_form = soup.find('form')
         
+        # Build login data with any hidden fields
         login_data = {
             'inputUsrNme': self.username,
             'inputPassword': self.password,
             'submit': 'Login'
         }
         
-        # Post login and follow redirects
-        response = session.post(self.login_url, data=login_data, allow_redirects=True)
-        _logger.info(f"Login final URL: {response.url}")
+        # Add any hidden fields from form
+        if login_form:
+            for hidden in login_form.find_all('input', type='hidden'):
+                login_data[hidden['name']] = hidden['value']
         
-        # Verify login success by checking if redirected to home.php
-        if 'home.php' not in response.url:
+        # Post login
+        response = session.post(self.login_url, data=login_data)
+        _logger.info(f"Login status: {response.status_code}")
+        _logger.info(f"Login response content: {response.text[:500]}")  # Log first 500 chars
+        
+        # Check for login form or error messages in response
+        soup = BeautifulSoup(response.text, 'html.parser')
+        if soup.find('form', {'action': 'action.php'}) or 'invalid' in response.text.lower():
             raise UserError("Login failed - Please check credentials")
             
         return session
