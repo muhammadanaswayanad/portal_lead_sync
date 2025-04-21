@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_portal_config_form" model="ir.ui.view">
+        <field name="name">portal.config.form</field>
+        <field name="model">portal.config</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="sync_leads" string="Sync Now" type="object" class="oe_highlight"/>
+                </header>
+                <sheet>
+                    <group>
+                        <field name="name"/>
+                        <field name="login_url"/>
+                        <field name="data_url"/>
+                        <field name="username"/>
+                        <field name="password" password="True"/>
+                        <field name="last_sync" readonly="1"/>
+                        <field name="active"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_portal_config" model="ir.actions.act_window">
+        <field name="name">Portal Configuration</field>
+        <field name="res_model">portal.config</field>
+        <field name="view_mode">form</field>
+    </record>
+
+    <menuitem id="menu_portal_config"
+              name="Portal Lead Sync"
+              parent="crm.crm_menu_config"
+              action="action_portal_config"
+              sequence="100"/>
+</odoo>
