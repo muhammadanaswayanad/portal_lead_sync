@@ -2,10 +2,12 @@ import requests
 import pandas as pd
 import tempfile
 import os
-import magic
 from odoo import models, fields, api
 from odoo.exceptions import UserError
 from urllib.parse import quote
+import logging
+
+_logger = logging.getLogger(__name__)
 
 class PortalConfig(models.Model):
     _name = 'portal.config'
@@ -21,15 +23,32 @@ class PortalConfig(models.Model):
 
     def _get_session(self):
         session = requests.Session()
+        
+        # Add browser-like headers
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        })
+        
         login_data = {
             'inputUsrNme': self.username,
-            'inputPassword': quote(self.password)
+            'inputPassword': quote(self.password),
+            'submit': 'Login'
         }
-        response = session.post(self.login_url, data=login_data)
         
-        # Check if login was successful by looking for HTML login form
-        if 'login' in response.text.lower() or 'password' in response.text.lower():
-            raise UserError("Login failed - please check credentials")
+        response = session.post(self.login_url, data=login_data, allow_redirects=True)
+        
+        _logger.info(f"Login response status: {response.status_code}")
+        _logger.info(f"Login response headers: {dict(response.headers)}")
+        _logger.info(f"Login response URL: {response.url}")
+        
+        # Verify login success by checking redirect or success URL
+        if 'login' in response.url.lower() or response.status_code == 401:
+            raise UserError("Login failed - Invalid credentials or access denied")
             
         return session
 
