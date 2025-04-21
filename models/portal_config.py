@@ -8,70 +8,70 @@ from urllib.parse import quote
 
 class PortalConfig(models.Model):
     _name = 'portal.config'
+    _description = 'Portal Configuration'
+
     name = fields.Char('Name', required=True)
     login_url = fields.Char('Login URL', required=True, default='https://www.cindrebay.in/action.php')
-    data_url = fields.Char('Data URL', required=True, default='https://www.cindrebay.in/download-data.php')e, default='https://www.cindrebay.in/action.php')
-    username = fields.Char('Username', required=True) default='https://www.cindrebay.in/download-data.php')
-    password = fields.Char('Password', required=True)rue)
-    last_sync = fields.Datetime('Last Sync Date')quired=True)
-    active = fields.Boolean(default=True)    last_sync = fields.Datetime('Last Sync Date')
-(default=True)
+    data_url = fields.Char('Data URL', required=True, default='https://www.cindrebay.in/download-data.php')
+    username = fields.Char('Username', required=True)
+    password = fields.Char('Password', required=True)
+    last_sync = fields.Datetime('Last Sync Date')
+    active = fields.Boolean(default=True)
+
     def _get_session(self):
-        session = requests.Session()elf):
+        session = requests.Session()
         login_data = {
             'inputUsrNme': self.username,
-            'inputPassword': quote(self.password)   'inputUsrNme': self.username,
+            'inputPassword': quote(self.password)
         }
         session.post(self.login_url, data=login_data)
-        return session        session.post(self.login_url, data=login_data)
+        return session
 
     def sync_leads(self):
         self.ensure_one()
-        session = self._get_session()self.ensure_one()
-        ession()
+        session = self._get_session()
+        
         # Download Excel file
         response = session.get(self.data_url)
-        if response.status_code != 200:on.get(self.data_url)
-            return False        if response.status_code != 200:
+        if response.status_code != 200:
+            return False
 
-        # Read Excel data
-        df = pd.read_excel(response.content)temporary file
-        Lead = self.env['crm.lead']ffix='.xlsx', delete=False) as temp_file:
-        SyncLog = self.env['lead.sync.log']            temp_file.write(response.content)
-me
-        for _, row in df.iterrows():
-            if SyncLog.search([('external_id', '=', str(row['id']))]):
-                continue            # Read Excel data with explicit engine
-mp_path, engine='openpyxl')
-            # Prepare lead values
-            vals = {d']
-                'name': row['name'],og']
-                'email_from': row['email'],
-                'phone': row['phone'],s():
-                'city': row['city'],w['id']))]):
-                'description': self._prepare_description(row),       continue
-            }
- lead values
-            # Create lead
-            lead = Lead.create(vals)        'name': row['name'],
-            _from': row['email'],
-            # Log the sync row['phone'],
-            SyncLog.create({
-                'external_id': str(row['id']),self._prepare_description(row),
-                'lead_id': lead.id,  }
-            })
+        # Save response content to temporary file
+        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as temp_file:
+            temp_file.write(response.content)
+            temp_path = temp_file.name
 
-        self.last_sync = fields.Datetime.now()d = Lead.create(vals)
-        return True                
+        try:
+            # Read Excel data with explicit engine
+            df = pd.read_excel(temp_path, engine='openpyxl')
+            
+            Lead = self.env['crm.lead']
+            SyncLog = self.env['lead.sync.log']
 
-    def _prepare_description(self, row):
-        # Combine all additional fields into notes
-        excluded_fields = ['id', 'name', 'email', 'phone', 'city']  'lead_id': lead.id,
-        notes = []
-        for column in row.index:
-            if column not in excluded_fields and row[column]:
-                notes.append(f"{column}: {row[column]}")
-        return '\n'.join(notes)
+            for _, row in df.iterrows():
+                if SyncLog.search([('external_id', '=', str(row['id']))]):
+                    continue
+
+                # Prepare lead values
+                vals = {
+                    'name': row['name'],
+                    'email_from': row['email'],
+                    'phone': row['phone'],
+                    'city': row['city'],
+                    'description': self._prepare_description(row),
+                }
+
+                # Create lead
+                lead = Lead.create(vals)
+                
+                # Log the sync
+                SyncLog.create({
+                    'external_id': str(row['id']),
+                    'lead_id': lead.id,
+                })
+
+            self.last_sync = fields.Datetime.now()
+            return True
 
         except Exception as e:
             raise UserError(f"Error processing Excel file: {str(e)}")
