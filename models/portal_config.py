@@ -4,7 +4,6 @@ import tempfile
 import os
 from odoo import models, fields, api
 from odoo.exceptions import UserError
-from urllib.parse import quote
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -27,69 +26,49 @@ class PortalConfig(models.Model):
         # Add browser-like headers
         session.headers.update({
             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
             'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-            'Origin': 'https://www.cindrebay.in',
-            'Referer': 'https://www.cindrebay.in/login.php'
+            'Connection': 'keep-alive'
         })
         
-        # First get the login page to obtain any CSRF token
-        login_page = session.get(self.login_url)
+        # First visit login page
+        session.get('https://www.cindrebay.in/login.php')
         
         login_data = {
             'inputUsrNme': self.username,
-            'inputPassword': self.password,  # Try without quote encoding
+            'inputPassword': self.password,
             'submit': 'Login'
         }
         
-        # Post login form
-        response = session.post(
-            self.login_url, 
-            data=login_data,
-            allow_redirects=True,
-            verify=False  # Add if there are SSL issues
-        )
+        # Post login and follow redirects
+        response = session.post(self.login_url, data=login_data, allow_redirects=True)
+        _logger.info(f"Login final URL: {response.url}")
         
-        _logger.info(f"Login response status: {response.status_code}")
-        _logger.info(f"Login response URL: {response.url}")
-        _logger.info(f"Cookies: {session.cookies.get_dict()}")
-        
-        # Check if PHPSESSID cookie is set
-        if 'PHPSESSID' not in session.cookies:
-            raise UserError("Login failed - No session cookie received")
+        # Verify login success by checking if redirected to home.php
+        if 'home.php' not in response.url:
+            raise UserError("Login failed - Please check credentials")
             
         return session
 
     def sync_leads(self):
         self.ensure_one()
         session = self._get_session()
-        
-        # Add specific headers for Excel download
-        session.headers.update({
-            'Accept': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        })
-        
+
+        # Download the file as .xls
         response = session.get(self.data_url)
-        _logger.info(f"Download response headers: {dict(response.headers)}")
-        
         if response.status_code != 200:
             raise UserError("Failed to download file from portal")
 
-        # Save and process Excel file
-        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as temp_file:
+        # Save as .xls since that's what the server sends
+        with tempfile.NamedTemporaryFile(suffix='.xls', delete=False) as temp_file:
             temp_file.write(response.content)
             temp_path = temp_file.name
 
         try:
-            # Try reading with different engines
-            try:
-                df = pd.read_excel(temp_path, engine='openpyxl')
-            except Exception as e:
-                _logger.warning(f"Failed to read with openpyxl: {e}")
-                df = pd.read_csv(temp_path)  # Try CSV as fallback
-
+            # Try reading with xlrd for .xls files
+            df = pd.read_excel(temp_path, engine='xlrd')
+            
             if df.empty:
                 raise UserError("No data found in the downloaded file")
 
@@ -123,6 +102,7 @@ class PortalConfig(models.Model):
             return True
 
         except Exception as e:
+            _logger.error(f"Error details: {str(e)}", exc_info=True)
             raise UserError(f"Error processing Excel file: {str(e)}")
         finally:
             if os.path.exists(temp_path):
