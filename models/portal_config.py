@@ -25,7 +25,12 @@ class PortalConfig(models.Model):
             'inputUsrNme': self.username,
             'inputPassword': quote(self.password)
         }
-        session.post(self.login_url, data=login_data)
+        response = session.post(self.login_url, data=login_data)
+        
+        # Check if login was successful by looking for HTML login form
+        if 'login' in response.text.lower() or 'password' in response.text.lower():
+            raise UserError("Login failed - please check credentials")
+            
         return session
 
     def sync_leads(self):
@@ -37,38 +42,23 @@ class PortalConfig(models.Model):
         if response.status_code != 200:
             raise UserError("Failed to download file from portal")
 
-        # Try different Excel formats
-        errors = []
-        
-        # First try xlsx
+        # Check if response is HTML instead of Excel
+        content_type = response.headers.get('content-type', '').lower()
+        if 'html' in content_type or response.content.startswith(b'<!DOCTYPE'):
+            raise UserError("Received HTML instead of Excel file - session may have expired")
+
+        # Save and process Excel file
         with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as temp_file:
             temp_file.write(response.content)
             temp_path = temp_file.name
-            
-        try:
-            df = pd.read_excel(temp_path, engine='openpyxl')
-        except Exception as e:
-            errors.append(f"XLSX attempt failed: {str(e)}")
-            # Try xls format
-            os.unlink(temp_path)
-            with tempfile.NamedTemporaryFile(suffix='.xls', delete=False) as temp_file:
-                temp_file.write(response.content)
-                temp_path = temp_file.name
-                try:
-                    df = pd.read_excel(temp_path, engine='xlrd')
-                except Exception as e:
-                    errors.append(f"XLS attempt failed: {str(e)}")
-                    raise UserError(f"Failed to read Excel file in any format. Errors:\n" + "\n".join(errors))
 
         try:
+            df = pd.read_excel(temp_path, engine='openpyxl')
+            
             if df.empty:
                 raise UserError("No data found in the downloaded file")
 
-            required_columns = ['id', 'name', 'email', 'phone', 'city']
-            missing_columns = [col for col in required_columns if col not in df.columns]
-            if missing_columns:
-                raise UserError(f"Missing required columns: {', '.join(missing_columns)}")
-
+            # Rest of the processing
             Lead = self.env['crm.lead']
             SyncLog = self.env['lead.sync.log']
 
@@ -98,7 +88,7 @@ class PortalConfig(models.Model):
             return True
 
         except Exception as e:
-            raise UserError(f"Error processing Excel data: {str(e)}")
+            raise UserError(f"Error processing Excel file: {str(e)}")
         finally:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
