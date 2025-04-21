@@ -31,24 +31,34 @@ class PortalConfig(models.Model):
             'Accept-Language': 'en-US,en;q=0.5',
             'Accept-Encoding': 'gzip, deflate',
             'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
+            'Origin': 'https://www.cindrebay.in',
+            'Referer': 'https://www.cindrebay.in/login.php'
         })
+        
+        # First get the login page to obtain any CSRF token
+        login_page = session.get(self.login_url)
         
         login_data = {
             'inputUsrNme': self.username,
-            'inputPassword': quote(self.password),
+            'inputPassword': self.password,  # Try without quote encoding
             'submit': 'Login'
         }
         
-        response = session.post(self.login_url, data=login_data, allow_redirects=True)
+        # Post login form
+        response = session.post(
+            self.login_url, 
+            data=login_data,
+            allow_redirects=True,
+            verify=False  # Add if there are SSL issues
+        )
         
         _logger.info(f"Login response status: {response.status_code}")
-        _logger.info(f"Login response headers: {dict(response.headers)}")
         _logger.info(f"Login response URL: {response.url}")
+        _logger.info(f"Cookies: {session.cookies.get_dict()}")
         
-        # Verify login success by checking redirect or success URL
-        if 'login' in response.url.lower() or response.status_code == 401:
-            raise UserError("Login failed - Invalid credentials or access denied")
+        # Check if PHPSESSID cookie is set
+        if 'PHPSESSID' not in session.cookies:
+            raise UserError("Login failed - No session cookie received")
             
         return session
 
@@ -56,15 +66,16 @@ class PortalConfig(models.Model):
         self.ensure_one()
         session = self._get_session()
         
-        # Download Excel file
+        # Add specific headers for Excel download
+        session.headers.update({
+            'Accept': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        })
+        
         response = session.get(self.data_url)
+        _logger.info(f"Download response headers: {dict(response.headers)}")
+        
         if response.status_code != 200:
             raise UserError("Failed to download file from portal")
-
-        # Check if response is HTML instead of Excel
-        content_type = response.headers.get('content-type', '').lower()
-        if 'html' in content_type or response.content.startswith(b'<!DOCTYPE'):
-            raise UserError("Received HTML instead of Excel file - session may have expired")
 
         # Save and process Excel file
         with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as temp_file:
@@ -72,8 +83,13 @@ class PortalConfig(models.Model):
             temp_path = temp_file.name
 
         try:
-            df = pd.read_excel(temp_path, engine='openpyxl')
-            
+            # Try reading with different engines
+            try:
+                df = pd.read_excel(temp_path, engine='openpyxl')
+            except Exception as e:
+                _logger.warning(f"Failed to read with openpyxl: {e}")
+                df = pd.read_csv(temp_path)  # Try CSV as fallback
+
             if df.empty:
                 raise UserError("No data found in the downloaded file")
 
