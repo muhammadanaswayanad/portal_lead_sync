@@ -102,34 +102,17 @@ class PortalConfig(models.Model):
             _logger.info("No new records found in date range")
             return True
 
-        # Save and process file
-        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            temp_file.write(response.content)
-            temp_path = temp_file.name
-
         try:
-            df = None
-            errors = []
-
-            # Try different formats
-            for engine, ext in [('openpyxl', '.xlsx'), ('xlrd', '.xls')]:
-                try:
-                    os.rename(temp_path, temp_path + ext)
-                    df = pd.read_excel(temp_path + ext, engine=engine)
-                    temp_path = temp_path + ext
-                    break
-                except Exception as e:
-                    errors.append(f"{engine} attempt failed: {str(e)}")
-                    os.rename(temp_path + ext, temp_path)
-
-            if df is None:
-                raise UserError(f"Failed to read file in any format. Errors:\n" + "\n".join(errors))
-
+            # Try reading as TSV
+            df = pd.read_csv(pd.io.common.BytesIO(response.content), sep='\t')
+            
             if df.empty:
                 raise UserError("No data found in the downloaded file")
 
             # Normalize column names
             df.columns = df.columns.str.lower().str.strip()
+            
+            _logger.info(f"Columns found: {list(df.columns)}")
             
             # Validate required columns
             required_columns = ['id', 'name', 'email', 'phone', 'city']
@@ -138,6 +121,7 @@ class PortalConfig(models.Model):
                 _logger.error(f"Available columns: {list(df.columns)}")
                 raise UserError(f"Missing required columns: {', '.join(missing_columns)}")
 
+            # Rest of the processing
             Lead = self.env['crm.lead']
             SyncLog = self.env['lead.sync.log']
 
@@ -172,9 +156,6 @@ class PortalConfig(models.Model):
         except Exception as e:
             _logger.error(f"Error details: {str(e)}", exc_info=True)
             raise UserError(f"Error processing file: {str(e)}")
-        finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
 
     def _prepare_description(self, row_dict):
         # Combine all additional fields into notes
