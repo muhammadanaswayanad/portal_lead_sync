@@ -141,7 +141,7 @@ class PortalConfig(models.Model):
                 raise UserError(f"Missing required columns: {', '.join(missing_columns)}")
 
             # Rest of the processing
-            Lead = self.env['crm.lead']
+            Lead = self.env['crm.lead'].sudo()  # Use sudo for lead creation
             SyncLog = self.env['lead.sync.log']
 
             for _, row in df.iterrows():
@@ -165,9 +165,10 @@ class PortalConfig(models.Model):
                     'source_id': self._get_lms_source(),
                 }
 
+                # Create lead as superuser
                 lead = Lead.create(vals)
                 
-                # Log the sync
+                # Log the sync - no need for sudo here
                 SyncLog.create({
                     'external_id': row_dict['id'],
                     'lead_id': lead.id,
