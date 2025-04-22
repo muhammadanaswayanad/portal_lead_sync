@@ -86,6 +86,13 @@ class PortalConfig(models.Model):
         teams = self.env['crm.team'].search([('active', '=', True)])
         return choice(teams).id if teams else False
 
+    def _get_lms_source(self):
+        Source = self.env['utm.source']
+        lms_source = Source.search([('name', '=', 'LMS')], limit=1)
+        if not lms_source:
+            lms_source = Source.create({'name': 'LMS'})
+        return lms_source.id
+
     def sync_leads(self):
         self.ensure_one()
         session = self._get_session()
@@ -155,7 +162,7 @@ class PortalConfig(models.Model):
                     'type': 'lead',
                     'team_id': self._get_random_team(),
                     'course_id': self._get_course_product(row_dict.get('course')),
-                    'source_id': self.env.ref('crm.utm_source_lms').id,  # Custom LMS source
+                    'source_id': self._get_lms_source(),
                 }
 
                 lead = Lead.create(vals)
