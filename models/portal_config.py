@@ -7,6 +7,7 @@ from odoo import models, fields, api
 from odoo.exceptions import UserError
 import logging
 from bs4 import BeautifulSoup
+from random import choice
 
 _logger = logging.getLogger(__name__)
 
@@ -74,6 +75,17 @@ class PortalConfig(models.Model):
             
         return session
 
+    def _get_course_product(self, course_name):
+        if not course_name:
+            return False
+        return self.env['product.product'].search([
+            ('name', 'ilike', course_name)
+        ], limit=1).id
+
+    def _get_random_team(self):
+        teams = self.env['crm.team'].search([('active', '=', True)])
+        return choice(teams).id if teams else False
+
     def sync_leads(self):
         self.ensure_one()
         session = self._get_session()
@@ -138,12 +150,11 @@ class PortalConfig(models.Model):
                     'phone': row_dict['phone'],
                     'city': row_dict['city'],
                     'description': self._prepare_description(row_dict),
-                    # Add required CRM fields
                     'expected_revenue': 0.0,
                     'probability': 10.0,
                     'type': 'lead',
-                    'user_id': self.env.uid,  # Current user
-                    'team_id': self.env.ref('sales_team.salesteam_website_sales').id,  # Default sales team
+                    'team_id': self._get_random_team(),
+                    'course_id': self._get_course_product(row_dict.get('course')),
                 }
 
                 lead = Lead.create(vals)
