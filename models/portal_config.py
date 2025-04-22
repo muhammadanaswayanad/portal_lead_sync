@@ -155,6 +155,7 @@ class PortalConfig(models.Model):
                     'type': 'lead',
                     'team_id': self._get_random_team(),
                     'course_id': self._get_course_product(row_dict.get('course')),
+                    'source_id': self.env.ref('crm.utm_source_lms').id,  # Custom LMS source
                 }
 
                 lead = Lead.create(vals)
