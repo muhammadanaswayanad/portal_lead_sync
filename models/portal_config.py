@@ -102,11 +102,6 @@ class PortalConfig(models.Model):
             _logger.info("No new records found in date range")
             return True
 
-        # Check content type and size
-        content_type = response.headers.get('content-type', '')
-        if not content_type.startswith('application/'):
-            raise UserError(f"Unexpected content type: {content_type}. Please check if session is valid.")
-
         # Save and process file
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
             temp_file.write(response.content)
@@ -127,34 +122,39 @@ class PortalConfig(models.Model):
                     errors.append(f"{engine} attempt failed: {str(e)}")
                     os.rename(temp_path + ext, temp_path)
 
-            # Try CSV as last resort
-            if df is None:
-                try:
-                    df = pd.read_csv(temp_path)
-                except Exception as e:
-                    errors.append(f"CSV attempt failed: {str(e)}")
-
             if df is None:
                 raise UserError(f"Failed to read file in any format. Errors:\n" + "\n".join(errors))
 
             if df.empty:
                 raise UserError("No data found in the downloaded file")
 
-            # Rest of the processing
+            # Normalize column names
+            df.columns = df.columns.str.lower().str.strip()
+            
+            # Validate required columns
+            required_columns = ['id', 'name', 'email', 'phone', 'city']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                _logger.error(f"Available columns: {list(df.columns)}")
+                raise UserError(f"Missing required columns: {', '.join(missing_columns)}")
+
             Lead = self.env['crm.lead']
             SyncLog = self.env['lead.sync.log']
 
             for _, row in df.iterrows():
-                if SyncLog.search([('external_id', '=', str(row['id']))]):
+                # Convert row values to string and handle missing values
+                row_dict = row.fillna('').astype(str).to_dict()
+                
+                if SyncLog.search([('external_id', '=', row_dict['id'])]):
                     continue
 
                 # Prepare lead values
                 vals = {
-                    'name': row['name'],
-                    'email_from': row['email'],
-                    'phone': row['phone'],
-                    'city': row['city'],
-                    'description': self._prepare_description(row),
+                    'name': row_dict['name'],
+                    'email_from': row_dict['email'],
+                    'phone': row_dict['phone'],
+                    'city': row_dict['city'],
+                    'description': self._prepare_description(row_dict),
                 }
 
                 # Create lead
@@ -162,7 +162,7 @@ class PortalConfig(models.Model):
                 
                 # Log the sync
                 SyncLog.create({
-                    'external_id': str(row['id']),
+                    'external_id': row_dict['id'],
                     'lead_id': lead.id,
                 })
 
@@ -176,11 +176,11 @@ class PortalConfig(models.Model):
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
 
-    def _prepare_description(self, row):
+    def _prepare_description(self, row_dict):
         # Combine all additional fields into notes
         excluded_fields = ['id', 'name', 'email', 'phone', 'city']
         notes = []
-        for column in row.index:
-            if column not in excluded_fields and row[column]:
-                notes.append(f"{column}: {row[column]}")
+        for key, value in row_dict.items():
+            if key not in excluded_fields and value:
+                notes.append(f"{key}: {value}")
         return '\n'.join(notes)
