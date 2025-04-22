@@ -126,22 +126,26 @@ class PortalConfig(models.Model):
             SyncLog = self.env['lead.sync.log']
 
             for _, row in df.iterrows():
-                # Convert row values to string and handle missing values
                 row_dict = row.fillna('').astype(str).to_dict()
                 
                 if SyncLog.search([('external_id', '=', row_dict['id'])]):
                     continue
 
-                # Prepare lead values
+                # Prepare lead values with required fields
                 vals = {
                     'name': row_dict['name'],
                     'email_from': row_dict['email'],
                     'phone': row_dict['phone'],
                     'city': row_dict['city'],
                     'description': self._prepare_description(row_dict),
+                    # Add required CRM fields
+                    'expected_revenue': 0.0,
+                    'probability': 10.0,
+                    'type': 'lead',
+                    'user_id': self.env.uid,  # Current user
+                    'team_id': self.env.ref('sales_team.salesteam_website_sales').id,  # Default sales team
                 }
 
-                # Create lead
                 lead = Lead.create(vals)
                 
                 # Log the sync
