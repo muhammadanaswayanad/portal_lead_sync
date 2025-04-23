@@ -14,16 +14,27 @@ _logger = logging.getLogger(__name__)
 class PortalConfig(models.Model):
     _name = 'portal.config'
     _description = 'Portal Configuration'
+    _rec_name = 'name'
+    _sql_constraints = [
+        ('name_uniq', 'unique(name)', 'Configuration name must be unique!')
+    ]
 
     name = fields.Char('Name', required=True)
-    login_url = fields.Char('Login URL', required=True, default='https://www.cindrebay.in/action.php')
-    data_url = fields.Char('Data URL', required=True, default='https://www.cindrebay.in/download-data.php')
-    username = fields.Char('Username', required=True)
-    password = fields.Char('Password', required=True)
-    last_sync = fields.Datetime('Last Sync Date')
-    active = fields.Boolean(default=True)
+    login_url = fields.Char('Login URL', required=True, default='https://www.cindrebay.in/action.php', 
+                           help="URL for login authentication")
+    data_url = fields.Char('Data URL', required=True, default='https://www.cindrebay.in/download-data.php', 
+                          help="URL for downloading leads data")
+    username = fields.Char('Username', required=True, help="Portal login username")
+    password = fields.Char('Password', required=True, help="Portal login password")
+    last_sync = fields.Datetime('Last Sync Date', readonly=True)
+    active = fields.Boolean(default=True, index=True)
     days_to_sync = fields.Integer('Days to Sync', default=7, 
         help="Number of days to look back for leads")
+
+    @api.model
+    def get_default_config(self):
+        """Get the default active configuration"""
+        return self.search([('active', '=', True)], limit=1)
 
     def _get_date_range(self):
         to_date = datetime.now()
@@ -163,6 +174,7 @@ class PortalConfig(models.Model):
                     'team_id': self._get_random_team(),
                     'course_id': self._get_course_product(row_dict.get('course')),
                     'source_id': self._get_lms_source(),
+                    'user_id': False,  # Set blank salesperson
                 }
 
                 # Create lead as superuser
