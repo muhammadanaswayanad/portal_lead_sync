@@ -175,6 +175,7 @@ class PortalConfig(models.Model):
                     'course_id': self._get_course_product(row_dict.get('course')),
                     'source_id': self._get_lms_source(),
                     'user_id': False,  # Set blank salesperson
+                    'partner_name': row_dict['name'],  # Add contact name
                 }
 
                 # Create lead as superuser
