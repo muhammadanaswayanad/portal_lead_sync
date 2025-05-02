@@ -41,10 +41,12 @@ class LeadSync(models.Model):
             ('preferred_cities', '!=', False)
         ])
         
+        # Normalize the city for better matching
+        city = city.lower().strip()
+        
         for team in all_teams:
             preferred_cities = [c.strip().lower() for c in team.preferred_cities.split(',')]
-            if any(city.lower() in preferred_city or preferred_city in city.lower() 
-                   for preferred_city in preferred_cities):
+            if any(city in preferred_city or preferred_city in city for preferred_city in preferred_cities):
                 return team
         
         return False

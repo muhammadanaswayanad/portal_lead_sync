@@ -5,9 +5,9 @@
         <field name="model">crm.team</field>
         <field name="inherit_id" ref="sales_team.crm_team_view_form"/>
         <field name="arch" type="xml">
-            <xpath expr="//field[@name='company_id']" position="after">
-                <field name="preferred_cities" placeholder="e.g. New York, Boston, Chicago"/>
-            </xpath>
+            <field name="company_id" position="after">
+                <field name="preferred_cities" placeholder="e.g. Bangalore, Calicut, Kochi"/>
+            </field>
         </field>
     </record>
 </odoo>
