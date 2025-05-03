@@ -63,38 +63,42 @@ class LeadSync(models.Model):
     def _assign_team_to_lead(self, lead_data):
         """
         Assign a team to the lead based on city matching logic with fallback to random assignment.
+        Store the normalized city in preferred_branch field.
         
         Args:
             lead_data (dict): The lead data containing city information
             
         Returns:
-            int: The ID of the selected sales team
+            tuple: (team_id, normalized_city) - The ID of the selected sales team and normalized city
         """
         # Extract city from lead data
         city = lead_data.get('city', '') or lead_data.get('contact_address', '')
         
-        if not city:
+        # Normalize city for consistent matching
+        normalized_city = city.lower().strip() if city else ''
+        
+        if not normalized_city:
             _logger.info("No city information provided in lead data, using random assignment")
             teams = self.env['crm.team'].search([])
             if teams:
                 random_team = random.choice(teams)
-                return random_team.id
-            return False
+                return random_team.id, normalized_city
+            return False, normalized_city
         
         # Try to find a matching team based on city
         matching_team = self._find_matching_team_by_city(city)
         if matching_team:
             _logger.info(f"Lead assigned to team {matching_team.name} based on city match: {city}")
-            return matching_team.id
+            return matching_team.id, normalized_city
             
         # Fallback to random assignment if no match found
         teams = self.env['crm.team'].search([])
         if teams:
             random_team = random.choice(teams)
             _logger.info(f"No city match found for '{city}'. Lead randomly assigned to: {random_team.name}")
-            return random_team.id
+            return random_team.id, normalized_city
         
-        return False  # No teams available
+        return False, normalized_city  # No teams available
 
     def sync_leads_from_portal(self):
         """Sync leads from external portal to Odoo CRM"""
@@ -119,6 +123,9 @@ class LeadSync(models.Model):
                 _logger.info(f"Lead {portal_lead.get('external_id')} already imported, skipping")
                 continue
                 
+            # Assign team and get normalized city
+            team_id, normalized_city = self._assign_team_to_lead(portal_lead)
+            
             # Prepare lead values
             lead_values = {
                 'name': portal_lead.get('name', 'Unknown Lead'),
@@ -126,8 +133,8 @@ class LeadSync(models.Model):
                 'phone': portal_lead.get('phone', False),
                 'description': portal_lead.get('description', ''),
                 'city': portal_lead.get('city', ''),
-                # Now assign team based on location instead of randomly
-                'team_id': self._assign_team_to_lead(portal_lead),
+                'team_id': team_id,
+                'preferred_branch': normalized_city,  # Store normalized city in preferred_branch field
             }
             
             # Create the lead with proper team assignment
@@ -140,7 +147,7 @@ class LeadSync(models.Model):
                     'lead_id': new_lead.id,
                 })
                 
-                _logger.info(f"Lead created: {new_lead.name}, assigned to team: {new_lead.team_id.name}")
+                _logger.info(f"Lead created: {new_lead.name}, assigned to team: {new_lead.team_id.name}, preferred branch: {normalized_city}")
             except Exception as e:
                 _logger.error(f"Error creating lead: {e}")
         
