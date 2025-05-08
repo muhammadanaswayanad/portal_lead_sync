@@ -93,8 +93,40 @@ class PortalConfig(models.Model):
             ('name', 'ilike', course_name)
         ], limit=1).id
 
-    def _get_random_team(self):
-        teams = self.env['crm.team'].search([('active', '=', True)])
+    def _get_team_by_city(self, city):
+        """Find a team matching the preferred city list"""
+        if not city:
+            return False
+            
+        # Normalize the city name
+        city = city.strip().lower()
+        
+        # Search for teams with matching preferred cities
+        teams = self.env['crm.team'].sudo().search([('active', '=', True)])
+        for team in teams:
+            # Skip teams with no preferred_cities
+            if not team.preferred_cities:
+                continue
+                
+            # Split and normalize city names
+            preferred_cities = [c.strip().lower() for c in team.preferred_cities.split(',')]
+            
+            # Check if city matches any preferred city
+            if city in preferred_cities:
+                return team.id
+                
+        # No match found, return False
+        return False
+
+    def _get_random_team(self, city=None):
+        """Get a team by city preference or random if no match"""
+        # Try to find team by city
+        team_id = self._get_team_by_city(city)
+        if team_id:
+            return team_id
+            
+        # If no match, get any active team randomly
+        teams = self.env['crm.team'].sudo().search([('active', '=', True)])
         return choice(teams).id if teams else False
 
     def _get_lms_source(self):
@@ -171,7 +203,7 @@ class PortalConfig(models.Model):
                     'expected_revenue': 0.0,
                     'probability': 10.0,
                     'type': 'lead',
-                    'team_id': self._get_random_team(),
+                    'team_id': self._get_random_team(row_dict.get('city')),
                     'course_id': self._get_course_product(row_dict.get('course')),
                     'source_id': self._get_lms_source(),
                     'user_id': False,  # Set blank salesperson
