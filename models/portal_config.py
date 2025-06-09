@@ -136,6 +136,32 @@ class PortalConfig(models.Model):
             lms_source = Source.create({'name': 'LMS'})
         return lms_source.id
 
+    def _find_duplicate_salesperson(self, email, phone):
+        """Find salesperson of any existing leads with same email or phone"""
+        if not email and not phone:
+            return False
+            
+        domain = ['|']
+        if email:
+            domain.append(('email_from', '=ilike', email))
+        else:
+            domain.append(('email_from', '=', False))
+            
+        if phone:
+            # Normalize phone number by removing spaces, dashes, etc.
+            normalized_phone = ''.join(c for c in phone if c.isdigit())
+            if normalized_phone:
+                domain.append(('phone', 'ilike', normalized_phone))
+        else:
+            domain.append(('phone', '=', False))
+            
+        # Search for duplicate leads with assigned salesperson
+        existing_lead = self.env['crm.lead'].sudo().search(domain + [('user_id', '!=', False)], limit=1)
+        
+        if existing_lead:
+            return existing_lead.user_id.id
+        return False
+
     def sync_leads(self):
         self.ensure_one()
         session = self._get_session()
@@ -193,6 +219,12 @@ class PortalConfig(models.Model):
                 if SyncLog.search([('external_id', '=', row_dict['id'])]):
                     continue
 
+                # Check for duplicate salesperson
+                existing_salesperson = self._find_duplicate_salesperson(
+                    row_dict.get('email'), 
+                    row_dict.get('phone')
+                )
+
                 # Prepare lead values with required fields
                 vals = {
                     'name': row_dict['name'],
@@ -206,8 +238,8 @@ class PortalConfig(models.Model):
                     'team_id': self._get_random_team(row_dict.get('city')),
                     'course_id': self._get_course_product(row_dict.get('course')),
                     'source_id': self._get_lms_source(),
-                    'user_id': False,  # Set blank salesperson
-                    'partner_name': row_dict['name'],  # Add contact name
+                    'user_id': existing_salesperson,  # Use existing salesperson if found, otherwise False
+                    'partner_name': row_dict['name'],
                 }
 
                 # Create lead as superuser
